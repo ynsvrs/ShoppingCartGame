@@ -1,0 +1,736 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Grocery Grab</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    height: 100%;
+    background: #f4ead3;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    overflow: hidden;
+    color: #3a2a18;
+  }
+  #wrap {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+  }
+  canvas {
+    display: block;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.35);
+    border-radius: 8px;
+  }
+  #hud {
+    position: absolute;
+    top: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    text-align: center;
+    pointer-events: none;
+    width: 460px;
+  }
+  #toprow {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0 4px;
+  }
+  #score { font-size: 30px; font-weight: 800; color: #fff; text-shadow: 0 2px 4px rgba(0,0,0,0.4); }
+  #level { font-size: 18px; font-weight: 700; color: #fff; text-shadow: 0 2px 4px rgba(0,0,0,0.4); }
+  #lives { font-size: 20px; letter-spacing: 2px; }
+  #listbar {
+    margin: 8px auto 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(255,255,255,0.92);
+    padding: 6px 16px;
+    border-radius: 20px;
+    box-shadow: 0 3px 8px rgba(0,0,0,0.2);
+    font-size: 18px;
+    font-weight: 700;
+    color: #2a6b2a;
+  }
+  #listbar .emojis { font-size: 24px; }
+  #best { margin-top: 6px; font-size: 15px; font-weight: 600; color: #ffe9b0; text-shadow: 0 1px 3px rgba(0,0,0,0.6); }
+  #hint {
+    margin: 8px auto 0;
+    display: inline-block;
+    background: rgba(0,0,0,0.28);
+    border-radius: 16px;
+    padding: 7px 16px;
+    font-size: 12.5px;
+    line-height: 1.5;
+    color: #fdf6e3;
+    max-width: 420px;
+  }
+  #hint b { color: #ffd54f; font-weight: 700; }
+  #overlay {
+    position: absolute;
+    inset: 0;
+    display: none;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    background: rgba(40,26,10,0.82);
+    text-align: center;
+  }
+  #overlay h1 { font-size: 44px; margin-bottom: 8px; color: #fff; }
+  #overlay p { font-size: 18px; color: #ffe9c2; margin-bottom: 6px; }
+  #overlay .gap { margin-bottom: 18px; }
+  #overlay button {
+    pointer-events: auto;
+    font-size: 16px;
+    padding: 12px 30px;
+    border: none;
+    border-radius: 10px;
+    background: #4caf50;
+    color: #fff;
+    cursor: pointer;
+    font-weight: 700;
+    transition: transform 0.1s, background 0.2s;
+  }
+  #overlay button:hover { background: #5cc760; transform: translateY(-2px); }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game"></canvas>
+  <div id="hud">
+    <div id="toprow">
+      <div id="level">Level 1</div>
+      <div id="score">0</div>
+      <div id="lives">❤❤❤</div>
+    </div>
+    <div id="listbar">Collect: <span class="emojis" id="listEmojis">🍎</span></div>
+    <div id="best">Best: 0</div>
+    <div id="hint"><b>← →</b> move cart &nbsp; · &nbsp; catch the listed fruit <b>+1</b> &nbsp; · &nbsp; ⭐ <b>+5</b> &nbsp; · &nbsp; wrong or missed <b>−1</b> &nbsp; · &nbsp; 💣 <b>−1 life</b></div>
+  </div>
+  <div id="overlay">
+    <h1>Game Over</h1>
+    <p id="finalScore">Score: 0</p>
+    <p id="finalLevel" class="gap">Reached Level 1</p>
+    <p id="bestScore" class="gap">Best: 0</p>
+    <button id="restart">Shop Again</button>
+  </div>
+</div>
+
+<script>
+(function () {
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const scoreEl = document.getElementById('score');
+  const levelEl = document.getElementById('level');
+  const livesEl = document.getElementById('lives');
+  const listEmojisEl = document.getElementById('listEmojis');
+  const bestEl = document.getElementById('best');
+  const overlay = document.getElementById('overlay');
+  const finalScore = document.getElementById('finalScore');
+  const finalLevel = document.getElementById('finalLevel');
+  const bestScore = document.getElementById('bestScore');
+  const restartBtn = document.getElementById('restart');
+
+  // Logical play-field; canvas scaled to device pixels for crispness.
+  const W = 480;
+  const H = 660;
+  const GROUND = H - 96;        // y of the cart's wheel line
+  const POINTS_PER_LEVEL = 10;
+
+  // The grocery catalog: name -> emoji. Six visually distinct fruits.
+  const GROCERIES = {
+    apple:  '🍎',
+    banana: '🍌',
+    tomato: '🍅',
+    carrot: '🥕',
+    orange: '🍊',
+    grapes: '🍇'
+  };
+  const ALL_NAMES = Object.keys(GROCERIES);
+
+  // Use the platform color-emoji font, or glyphs render as faint outlines.
+  const EMOJI_FONT = '"Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",sans-serif';
+
+
+  let player;        // {x, w, speed}
+  let items;         // falling things
+  let score;
+  let lives;
+  let level;
+  let targets;       // array of target grocery names for this level
+  let spawnTimer;
+  let state;         // 'playing' | 'over'
+  let keys;
+  let highScore = 0; // best score this session
+  let levelFlash;    // {text, timer} for the "Level N!" banner
+
+  // ---- Sound (Web Audio API, all generated in code) ----
+  let audioCtx = null;
+  function ensureAudio() {
+    if (!audioCtx) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (AC) audioCtx = new AC();
+    }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  function tone(freq, dur, type, gain, startOffset) {
+    if (!audioCtx) return;
+    const t0 = audioCtx.currentTime + (startOffset || 0);
+    const osc = audioCtx.createOscillator();
+    const env = audioCtx.createGain();
+    osc.type = type || 'sine';
+    if (Array.isArray(freq)) {
+      osc.frequency.setValueAtTime(freq[0], t0);
+      osc.frequency.exponentialRampToValueAtTime(Math.max(1, freq[1]), t0 + dur);
+    } else {
+      osc.frequency.setValueAtTime(freq, t0);
+    }
+    const g = gain == null ? 0.2 : gain;
+    env.gain.setValueAtTime(0.0001, t0);
+    env.gain.exponentialRampToValueAtTime(g, t0 + 0.01);
+    env.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    osc.connect(env).connect(audioCtx.destination);
+    osc.start(t0);
+    osc.stop(t0 + dur + 0.02);
+  }
+  const sfx = {
+    good()  { tone(660, 0.09, 'triangle', 0.22, 0); tone(990, 0.12, 'triangle', 0.20, 0.07); },
+    golden(){ tone(784, 0.09, 'triangle', 0.22, 0.00); tone(988, 0.09, 'triangle', 0.22, 0.08);
+              tone(1319, 0.16, 'triangle', 0.22, 0.16); },
+    wrong() { tone([400, 200], 0.18, 'sine', 0.18, 0); },
+    miss()  { tone([520, 240], 0.18, 'sine', 0.18, 0); },
+    bomb()  { tone([180, 70], 0.32, 'sawtooth', 0.28, 0); tone([120, 50], 0.32, 'square', 0.12, 0); },
+    level() { tone(523, 0.10, 'triangle', 0.22, 0.00); tone(659, 0.10, 'triangle', 0.22, 0.10);
+              tone(784, 0.10, 'triangle', 0.22, 0.20); tone(1047, 0.18, 'triangle', 0.22, 0.30); },
+    over()  { tone([440, 415], 0.22, 'triangle', 0.22, 0.00); tone([349, 330], 0.22, 'triangle', 0.22, 0.22);
+              tone([262, 245], 0.45, 'triangle', 0.22, 0.44); }
+  };
+
+  function setupCanvas() {
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = W * dpr;
+    canvas.height = H * dpr;
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  // Pick `count` distinct random fruit names from the catalog.
+  function pickRandom(count) {
+    const pool = ALL_NAMES.slice();
+    const out = [];
+    for (let i = 0; i < count && pool.length; i++) {
+      const idx = (Math.random() * pool.length) | 0;
+      out.push(pool.splice(idx, 1)[0]);
+    }
+    return out;
+  }
+
+  // Level 1 is always apples (gentle intro). From level 2 on, the game picks
+  // a random shopping list that grows by one fruit each level.
+  function targetsForLevel(n) {
+    if (n === 1) return ['apple'];
+    return pickRandom(Math.min(n, ALL_NAMES.length));
+  }
+
+  function reset() {
+    player = { x: W / 2, w: 158, speed: 7 };
+    items = [];
+    score = 0;
+    lives = 3;
+    level = 1;
+    targets = targetsForLevel(1);
+    spawnTimer = 0;
+    state = 'playing';
+    keys = {};
+    levelFlash = null;
+    overlay.style.display = 'none';
+    updateHud();
+  }
+
+  function updateHud() {
+    scoreEl.textContent = score;
+    levelEl.textContent = 'Level ' + level;
+    listEmojisEl.textContent = targets.map(n => GROCERIES[n]).join(' ');
+    if (score > highScore) highScore = score;
+    bestEl.textContent = 'Best: ' + highScore;
+    livesEl.innerHTML = '❤'.repeat(lives) +
+      '<span style="opacity:.2">❤</span>'.repeat(Math.max(0, 3 - lives));
+  }
+
+  // ---- Difficulty (scales with level) ----
+  function fallSpeed()    { return 2.2 + (level - 1) * 0.9; }
+  function spawnInterval(){ return Math.max(26, 78 - (level - 1) * 6); }
+  function bombChance()   { return Math.min(0.4, 0.12 + (level - 1) * 0.03); }
+
+  function isTarget(name) { return targets.indexOf(name) !== -1; }
+
+  function spawn() {
+    const r = 24;
+    let type, name, emoji;
+    if (Math.random() < bombChance()) {
+      type = 'bomb';
+      emoji = '💣';
+      name = null;
+    } else if (Math.random() < 0.05) {
+      // Rare golden star — worth 5x, always good to catch.
+      type = 'golden';
+      emoji = '⭐';
+      name = null;
+    } else {
+      type = 'grocery';
+      // Bias toward target items so the list is catchable (~55% targets).
+      if (Math.random() < 0.55) {
+        name = targets[(Math.random() * targets.length) | 0];
+      } else {
+        name = ALL_NAMES[(Math.random() * ALL_NAMES.length) | 0];
+      }
+      emoji = GROCERIES[name];
+    }
+    items.push({
+      x: r + Math.random() * (W - 2 * r),
+      y: -r,
+      r: r,
+      vy: fallSpeed() * (0.85 + Math.random() * 0.3),
+      type: type,
+      name: name,
+      emoji: emoji,
+      wobble: Math.random() * Math.PI * 2
+    });
+  }
+
+  // Cart geometry derived from player position. The "mouth" is the catch zone.
+  function cart() {
+    const top = GROUND - 62;
+    return { left: player.x - player.w / 2, right: player.x + player.w / 2, top: top, bottom: top + 66 };
+  }
+
+  function levelUp() {
+    level++;
+    targets = targetsForLevel(level);
+    levelFlash = { text: 'Level ' + level + '!', timer: 110 };
+    sfx.level();
+    updateHud();
+  }
+
+  function update() {
+    if (levelFlash && levelFlash.timer > 0) levelFlash.timer--;
+    if (state !== 'playing') return;
+
+    if (keys['ArrowLeft'])  player.x -= player.speed;
+    if (keys['ArrowRight']) player.x += player.speed;
+    player.x = Math.max(player.w / 2, Math.min(W - player.w / 2, player.x));
+
+    if (--spawnTimer <= 0) {
+      spawn();
+      spawnTimer = spawnInterval();
+    }
+
+    const c = cart();
+    for (let i = items.length - 1; i >= 0; i--) {
+      const it = items[i];
+      it.y += it.vy;
+      it.wobble += 0.05;
+
+      const caught = it.x > c.left && it.x < c.right &&
+                     it.y + it.r >= c.top && it.y - it.r <= c.bottom;
+      if (caught) {
+        items.splice(i, 1);
+        if (it.type === 'bomb') {
+          sfx.bomb();
+          lives--;
+          updateHud();
+          if (lives <= 0) { gameOver(); return; }
+        } else if (it.type === 'golden') {
+          sfx.golden();
+          score += 5;          // rare bonus star
+          updateHud();
+          if (score >= level * POINTS_PER_LEVEL) levelUp();
+        } else if (isTarget(it.name)) {
+          sfx.good();
+          score++;
+          updateHud();
+          if (score >= level * POINTS_PER_LEVEL) levelUp();
+        } else {
+          sfx.wrong();        // caught something not on the list
+          score--;
+          updateHud();
+        }
+        continue;
+      }
+
+      // Fell past the bottom.
+      if (it.y - it.r > H) {
+        if (it.type === 'grocery' && isTarget(it.name)) {
+          sfx.miss();         // missing a needed item is a penalty
+          score--;
+          updateHud();
+        }
+        // Missing a wrong item or a bomb is correct play — no penalty.
+        items.splice(i, 1);
+      }
+    }
+  }
+
+  function gameOver() {
+    state = 'over';
+    sfx.over();
+    if (score > highScore) highScore = score;
+    finalScore.textContent = 'Score: ' + score;
+    finalLevel.textContent = 'Reached Level ' + level;
+    bestScore.textContent = 'Best: ' + highScore;
+    overlay.style.display = 'flex';
+  }
+
+  // ---- Drawing ----
+  function drawBackground() {
+    // Deep teal store wall — gives bold fruit discs and white HUD text strong contrast.
+    const grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, '#1f5e63');
+    grad.addColorStop(1, '#163f47');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+
+    // Plain shelves only — no decorative produce, so nothing is mistaken
+    // for a real falling item.
+    const shelfYs = [120, 230, 340];
+    for (const sy of shelfYs) {
+      ctx.fillStyle = 'rgba(255,255,255,0.10)';
+      ctx.fillRect(0, sy, W, 14);
+      ctx.fillStyle = 'rgba(0,0,0,0.12)';
+      ctx.fillRect(0, sy + 14, W, 4);
+    }
+
+    // Floor.
+    ctx.fillStyle = '#5a4632';
+    ctx.fillRect(0, GROUND + 30, W, H - (GROUND + 30));
+    ctx.fillStyle = 'rgba(0,0,0,0.12)';
+    for (let x = 0; x < W; x += 40) ctx.fillRect(x, GROUND + 30, 2, H);
+  }
+
+  function drawItem(it) {
+    const x = it.x + Math.sin(it.wobble) * 2;
+    const y = it.y;
+
+    if (it.type === 'golden') {
+      // Pulsing golden glow halo.
+      const pulse = it.r + 6 + Math.sin(it.wobble * 3) * 4;
+      const g = ctx.createRadialGradient(x, y, it.r * 0.2, x, y, pulse + 10);
+      g.addColorStop(0, 'rgba(255,225,120,0.85)');
+      g.addColorStop(1, 'rgba(255,205,50,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(x, y, pulse + 10, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Rotating twinkle sparkles around the star.
+      ctx.fillStyle = '#fffbe6';
+      for (let s = 0; s < 4; s++) {
+        const ang = it.wobble * 2 + s * Math.PI / 2;
+        const dist = it.r + 6;
+        const sx = x + Math.cos(ang) * dist;
+        const sy = y + Math.sin(ang) * dist;
+        const size = 2.5 + Math.abs(Math.sin(it.wobble * 3 + s)) * 3;
+        ctx.beginPath();
+        ctx.moveTo(sx, sy - size);
+        ctx.lineTo(sx + size * 0.4, sy);
+        ctx.lineTo(sx, sy + size);
+        ctx.lineTo(sx - size * 0.4, sy);
+        ctx.closePath();
+        ctx.fill();
+      }
+    } else if (it.type === 'bomb') {
+      // Dark disc + bold red ring so the bomb is unmistakable.
+      ctx.beginPath();
+      ctx.arc(x, y, it.r + 3, 0, Math.PI * 2);
+      ctx.fillStyle = '#2b2b33';
+      ctx.fill();
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = '#ff3b3b';
+      ctx.stroke();
+    }
+
+    // Emoji drawn directly. Force full opacity and an opaque fill first:
+    // canvas multiplies the emoji by the current globalAlpha and fillStyle
+    // alpha, and a leftover semi-transparent fillStyle from the background
+    // was making fruit render see-through.
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = '#000';
+    ctx.font = Math.round(it.r * 2) + 'px ' + EMOJI_FONT;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(it.emoji, x, y + 1);
+  }
+
+  // A wheel with a chrome hub and spokes.
+  function drawWheel(wx, wy, r) {
+    ctx.save();
+    // tyre
+    ctx.beginPath();
+    ctx.arc(wx, wy, r, 0, Math.PI * 2);
+    ctx.fillStyle = '#2b2b30';
+    ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = '#000';
+    ctx.stroke();
+    // chrome hub
+    const hub = ctx.createRadialGradient(wx - r * 0.3, wy - r * 0.3, 1, wx, wy, r * 0.62);
+    hub.addColorStop(0, '#ffffff');
+    hub.addColorStop(0.5, '#cfd6dc');
+    hub.addColorStop(1, '#7c858d');
+    ctx.beginPath();
+    ctx.arc(wx, wy, r * 0.6, 0, Math.PI * 2);
+    ctx.fillStyle = hub;
+    ctx.fill();
+    // spokes
+    ctx.strokeStyle = 'rgba(80,90,100,0.7)';
+    ctx.lineWidth = 1.4;
+    for (let s = 0; s < 4; s++) {
+      const a = s * Math.PI / 2 + 0.4;
+      ctx.beginPath();
+      ctx.moveTo(wx, wy);
+      ctx.lineTo(wx + Math.cos(a) * r * 0.55, wy + Math.sin(a) * r * 0.55);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function drawPlayer() {
+    const c = cart();
+    const bob = Math.sin(performance.now() / 220) * 1.5;  // gentle idle bob
+
+    // ---- Soft shadow on the floor ----
+    ctx.save();
+    ctx.fillStyle = 'rgba(0,0,0,0.22)';
+    ctx.beginPath();
+    ctx.ellipse(player.x, GROUND + 26, player.w * 0.52, 9, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    // ---- Shopper (behind the cart, on the right) ----
+    const headX = c.right + 26;
+    const headY = c.top - 26 + bob;
+    // body / shirt
+    ctx.fillStyle = '#3f8ad1';
+    ctx.beginPath();
+    ctx.moveTo(headX - 14, headY + 38);
+    ctx.quadraticCurveTo(headX - 16, headY + 12, headX, headY + 10);
+    ctx.quadraticCurveTo(headX + 16, headY + 12, headX + 14, headY + 38);
+    ctx.closePath();
+    ctx.fill();
+    // arm reaching to the cart handle
+    ctx.strokeStyle = '#3f8ad1';
+    ctx.lineCap = 'round';
+    ctx.lineWidth = 7;
+    ctx.beginPath();
+    ctx.moveTo(headX - 6, headY + 18);
+    ctx.lineTo(c.right + 4, c.top - 2);
+    ctx.stroke();
+    // hand
+    ctx.fillStyle = '#ffcd9b';
+    ctx.beginPath();
+    ctx.arc(c.right + 4, c.top - 2, 4.5, 0, Math.PI * 2);
+    ctx.fill();
+    // hair
+    ctx.fillStyle = '#5a3b22';
+    ctx.beginPath();
+    ctx.arc(headX, headY, 14, Math.PI, 0);
+    ctx.fill();
+    // head
+    ctx.fillStyle = '#ffcd9b';
+    ctx.beginPath();
+    ctx.arc(headX, headY, 12, 0, Math.PI * 2);
+    ctx.fill();
+    // face: eyes, rosy cheeks, smile
+    ctx.fillStyle = '#3a2a18';
+    ctx.beginPath();
+    ctx.arc(headX - 4, headY - 1, 1.7, 0, Math.PI * 2);
+    ctx.arc(headX + 4, headY - 1, 1.7, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255,120,120,0.5)';
+    ctx.beginPath();
+    ctx.arc(headX - 6, headY + 4, 2.4, 0, Math.PI * 2);
+    ctx.arc(headX + 6, headY + 4, 2.4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#3a2a18';
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    ctx.arc(headX, headY + 2, 4, 0.15 * Math.PI, 0.85 * Math.PI);
+    ctx.stroke();
+
+    // ---- Cart handle (chrome) ----
+    ctx.strokeStyle = '#b8c0c7';
+    ctx.lineCap = 'round';
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.moveTo(c.right - 4, c.top);
+    ctx.lineTo(c.right + 14, c.top - 8);
+    ctx.stroke();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+    ctx.beginPath();
+    ctx.moveTo(c.right - 4, c.top - 1);
+    ctx.lineTo(c.right + 14, c.top - 9);
+    ctx.stroke();
+
+    // ---- Basket body (glossy gradient trapezoid) ----
+    const bodyGrad = ctx.createLinearGradient(0, c.top, 0, c.bottom);
+    bodyGrad.addColorStop(0, '#ff6b5e');
+    bodyGrad.addColorStop(0.5, '#e63b3b');
+    bodyGrad.addColorStop(1, '#b71c1c');
+    ctx.fillStyle = bodyGrad;
+    ctx.beginPath();
+    ctx.moveTo(c.left, c.top);
+    ctx.lineTo(c.right, c.top);
+    ctx.lineTo(c.right - 16, c.bottom);
+    ctx.lineTo(c.left + 16, c.bottom);
+    ctx.closePath();
+    ctx.fill();
+
+    // clip the mesh + gloss to the basket shape
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(c.left, c.top);
+    ctx.lineTo(c.right, c.top);
+    ctx.lineTo(c.right - 16, c.bottom);
+    ctx.lineTo(c.left + 16, c.bottom);
+    ctx.closePath();
+    ctx.clip();
+
+    // diagonal wire mesh
+    ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+    ctx.lineWidth = 1.5;
+    for (let gx = c.left - 10; gx < c.right + 30; gx += 16) {
+      ctx.beginPath();
+      ctx.moveTo(gx, c.top);
+      ctx.lineTo(gx - 22, c.bottom);
+      ctx.stroke();
+    }
+    for (let gx = c.left - 30; gx < c.right + 10; gx += 16) {
+      ctx.beginPath();
+      ctx.moveTo(gx, c.top);
+      ctx.lineTo(gx + 22, c.bottom);
+      ctx.stroke();
+    }
+    // horizontal rails
+    ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+    for (let gy = c.top + 14; gy < c.bottom; gy += 16) {
+      ctx.beginPath();
+      ctx.moveTo(c.left + 2, gy);
+      ctx.lineTo(c.right - 2, gy);
+      ctx.stroke();
+    }
+    // gloss highlight sweep
+    ctx.fillStyle = 'rgba(255,255,255,0.18)';
+    ctx.beginPath();
+    ctx.moveTo(c.left + 6, c.top);
+    ctx.lineTo(c.left + 40, c.top);
+    ctx.lineTo(c.left + 24, c.bottom);
+    ctx.lineTo(c.left + 14, c.bottom);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+
+    // ---- Top rim (rounded chrome bar) ----
+    const rimGrad = ctx.createLinearGradient(0, c.top - 8, 0, c.top + 2);
+    rimGrad.addColorStop(0, '#ff8a7d');
+    rimGrad.addColorStop(1, '#c62828');
+    ctx.fillStyle = rimGrad;
+    ctx.beginPath();
+    ctx.roundRect(c.left - 4, c.top - 8, player.w + 8, 10, 5);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.beginPath();
+    ctx.roundRect(c.left - 1, c.top - 6, player.w + 2, 3, 2);
+    ctx.fill();
+
+    // ---- Lower chrome frame + legs to the wheels ----
+    const axleY = GROUND + 16;
+    ctx.strokeStyle = '#9aa0a6';
+    ctx.lineWidth = 4;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(c.left + 16, c.bottom);
+    ctx.lineTo(c.left + 22, axleY);
+    ctx.moveTo(c.right - 16, c.bottom);
+    ctx.lineTo(c.right - 22, axleY);
+    ctx.stroke();
+
+    // ---- Wheels ----
+    drawWheel(c.left + 22, axleY, 9);
+    drawWheel(c.right - 22, axleY, 9);
+  }
+
+  function drawFlash() {
+    if (!levelFlash || levelFlash.timer <= 0) return;
+    const t = levelFlash.timer;
+    const alpha = Math.min(1, t / 30);    // fade out near the end
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = 'bold 56px Segoe UI, sans-serif';
+    ctx.fillStyle = '#2a6b2a';
+    ctx.lineWidth = 6;
+    ctx.strokeStyle = '#fff';
+    ctx.strokeText(levelFlash.text, W / 2, H / 2 - 30);
+    ctx.fillText(levelFlash.text, W / 2, H / 2 - 30);
+    ctx.font = 'bold 20px Segoe UI, sans-serif';
+    ctx.fillStyle = '#3a2a18';
+    ctx.fillText('New shopping list!', W / 2, H / 2 + 14);
+    ctx.restore();
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    drawBackground();
+    for (const it of items) drawItem(it);
+    drawPlayer();
+    drawFlash();
+  }
+
+  function loop() {
+    update();
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  // roundRect polyfill for older canvas implementations.
+  if (!ctx.roundRect) {
+    CanvasRenderingContext2D.prototype.roundRect = function (x, y, w, h, r) {
+      this.beginPath();
+      this.moveTo(x + r, y);
+      this.arcTo(x + w, y, x + w, y + h, r);
+      this.arcTo(x + w, y + h, x, y + h, r);
+      this.arcTo(x, y + h, x, y, r);
+      this.arcTo(x, y, x + w, y, r);
+      this.closePath();
+      return this;
+    };
+  }
+
+  // ---- Input ----
+  window.addEventListener('keydown', ensureAudio);
+  window.addEventListener('pointerdown', ensureAudio);
+  window.addEventListener('keydown', function (e) {
+    if (e.code === 'ArrowLeft' || e.code === 'ArrowRight') {
+      keys[e.code] = true;
+      e.preventDefault();
+    }
+  });
+  window.addEventListener('keyup', function (e) { keys[e.code] = false; });
+  restartBtn.addEventListener('click', reset);
+
+  setupCanvas();
+  window.addEventListener('resize', setupCanvas);
+  reset();
+  loop();
+})();
+</script>
+</body>
+</html>

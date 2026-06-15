@@ -1,0 +1,10 @@
+# Virtual environment
+.venv/
+
+# IDE
+.idea/
+.claude/
+
+# OS
+Thumbs.db
+.DS_Store
