@@ -41,6 +41,24 @@
     align-items: center;
     padding: 0 4px;
   }
+  #pauseBtn {
+    position: absolute;
+    top: -2px;
+    right: 4px;
+    z-index: 5;
+    pointer-events: auto;
+    width: 38px;
+    height: 38px;
+    border: none;
+    border-radius: 10px;
+    background: rgba(0,0,0,0.32);
+    color: #fff;
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+    transition: background 0.2s, transform 0.1s;
+  }
+  #pauseBtn:hover { background: rgba(0,0,0,0.5); transform: translateY(-1px); }
   #score { font-size: 30px; font-weight: 800; color: #fff; text-shadow: 0 2px 4px rgba(0,0,0,0.4); }
   #level { font-size: 18px; font-weight: 700; color: #fff; text-shadow: 0 2px 4px rgba(0,0,0,0.4); }
   #lives { font-size: 20px; letter-spacing: 2px; }
@@ -103,6 +121,7 @@
 <div id="wrap">
   <canvas id="game"></canvas>
   <div id="hud">
+    <button id="pauseBtn" aria-label="Pause">⏸</button>
     <div id="toprow">
       <div id="level">Level 1</div>
       <div id="score">0</div>
@@ -135,6 +154,7 @@
   const finalLevel = document.getElementById('finalLevel');
   const bestScore = document.getElementById('bestScore');
   const restartBtn = document.getElementById('restart');
+  const pauseBtn = document.getElementById('pauseBtn');
 
   // Logical play-field; canvas scaled to device pixels for crispness.
   const W = 720;
@@ -164,7 +184,7 @@
   let level;
   let targets;       // array of target grocery names for this level
   let spawnTimer;
-  let state;         // 'playing' | 'over'
+  let state;         // 'playing' | 'paused' | 'over'
   let keys;
   let highScore = 0; // best score this session
   let levelFlash;    // {text, timer} for the "Level N!" banner
@@ -261,6 +281,8 @@
     effects = { wide: 0, slow: 0 };   // seconds remaining for each power-up
     lastTime = 0;
     overlay.style.display = 'none';
+    pauseBtn.textContent = '⏸';
+    pauseBtn.setAttribute('aria-label', 'Pause');
     updateHud();
   }
 
@@ -422,6 +444,15 @@
     bestScore.textContent = 'Best: ' + highScore;
     overlay.style.display = 'flex';
   }
+
+  // Pause only toggles during active play; ignored once the game is over.
+  function setPaused(p) {
+    if (state === 'over') return;
+    state = p ? 'paused' : 'playing';
+    pauseBtn.textContent = p ? '▶' : '⏸';
+    pauseBtn.setAttribute('aria-label', p ? 'Resume' : 'Pause');
+  }
+  function togglePause() { setPaused(state === 'playing'); }
 
   // ---- Drawing ----
   function drawBackground() {
@@ -869,12 +900,29 @@
     ctx.restore();
   }
 
+  function drawPause() {
+    if (state !== 'paused') return;
+    ctx.save();
+    ctx.fillStyle = 'rgba(20,40,44,0.6)';
+    ctx.fillRect(0, 0, W, H);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 60px Segoe UI, sans-serif';
+    ctx.fillText('Paused', W / 2, H / 2 - 18);
+    ctx.font = '20px Segoe UI, sans-serif';
+    ctx.fillStyle = '#ffe9c2';
+    ctx.fillText('Press P or tap ▶ to resume', W / 2, H / 2 + 28);
+    ctx.restore();
+  }
+
   function draw() {
     ctx.clearRect(0, 0, W, H);
     drawBackground();
     for (const it of items) drawItem(it);
     drawPlayer();
     drawEffectChips();
+    drawPause();
     drawFlash();
   }
 
@@ -905,10 +953,14 @@
     if (e.code === 'ArrowLeft' || e.code === 'ArrowRight') {
       keys[e.code] = true;
       e.preventDefault();
+    } else if (e.code === 'KeyP' || e.code === 'Escape') {
+      togglePause();
+      e.preventDefault();
     }
   });
   window.addEventListener('keyup', function (e) { keys[e.code] = false; });
   restartBtn.addEventListener('click', reset);
+  pauseBtn.addEventListener('click', togglePause);
 
   setupCanvas();
   window.addEventListener('resize', setupCanvas);
