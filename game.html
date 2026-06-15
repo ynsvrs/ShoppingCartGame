@@ -513,54 +513,75 @@
     ctx.restore();
 
     // ---- Shopper (behind the cart, on the right) ----
-    const headX = c.right + 26;
-    const headY = c.top - 26 + bob;
-    // body / shirt
-    ctx.fillStyle = '#3f8ad1';
+    const headR = 20;                 // bigger head
+    const headX = c.right + 40;
+    const headY = c.top - 44 + bob;
+    const hipY  = GROUND + 6;          // body reaches down near the floor
+    // legs
+    ctx.strokeStyle = '#2e3a52';
+    ctx.lineCap = 'round';
+    ctx.lineWidth = 9;
     ctx.beginPath();
-    ctx.moveTo(headX - 14, headY + 38);
-    ctx.quadraticCurveTo(headX - 16, headY + 12, headX, headY + 10);
-    ctx.quadraticCurveTo(headX + 16, headY + 12, headX + 14, headY + 38);
+    ctx.moveTo(headX - 7, hipY - 4);
+    ctx.lineTo(headX - 9, hipY + 22);
+    ctx.moveTo(headX + 7, hipY - 4);
+    ctx.lineTo(headX + 9, hipY + 22);
+    ctx.stroke();
+    // shoes
+    ctx.fillStyle = '#1b2233';
+    ctx.beginPath();
+    ctx.ellipse(headX - 11, hipY + 23, 7, 4, 0, 0, Math.PI * 2);
+    ctx.ellipse(headX + 11, hipY + 23, 7, 4, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // body / shirt (taller torso)
+    const shirt = ctx.createLinearGradient(0, headY + headR, 0, hipY);
+    shirt.addColorStop(0, '#56a0e0');
+    shirt.addColorStop(1, '#3f8ad1');
+    ctx.fillStyle = shirt;
+    ctx.beginPath();
+    ctx.moveTo(headX - 22, hipY);
+    ctx.quadraticCurveTo(headX - 26, headY + headR + 6, headX, headY + headR - 2);
+    ctx.quadraticCurveTo(headX + 26, headY + headR + 6, headX + 22, hipY);
     ctx.closePath();
     ctx.fill();
     // arm reaching to the cart handle
     ctx.strokeStyle = '#3f8ad1';
     ctx.lineCap = 'round';
-    ctx.lineWidth = 7;
+    ctx.lineWidth = 11;
     ctx.beginPath();
-    ctx.moveTo(headX - 6, headY + 18);
-    ctx.lineTo(c.right + 4, c.top - 2);
+    ctx.moveTo(headX - 12, headY + headR + 14);
+    ctx.lineTo(c.right + 6, c.top - 4);
     ctx.stroke();
     // hand
     ctx.fillStyle = '#ffcd9b';
     ctx.beginPath();
-    ctx.arc(c.right + 4, c.top - 2, 4.5, 0, Math.PI * 2);
+    ctx.arc(c.right + 6, c.top - 4, 7, 0, Math.PI * 2);
     ctx.fill();
     // hair
     ctx.fillStyle = '#5a3b22';
     ctx.beginPath();
-    ctx.arc(headX, headY, 14, Math.PI, 0);
+    ctx.arc(headX, headY, headR + 3, Math.PI, 0);
     ctx.fill();
     // head
     ctx.fillStyle = '#ffcd9b';
     ctx.beginPath();
-    ctx.arc(headX, headY, 12, 0, Math.PI * 2);
+    ctx.arc(headX, headY, headR, 0, Math.PI * 2);
     ctx.fill();
     // face: eyes, rosy cheeks, smile
     ctx.fillStyle = '#3a2a18';
     ctx.beginPath();
-    ctx.arc(headX - 4, headY - 1, 1.7, 0, Math.PI * 2);
-    ctx.arc(headX + 4, headY - 1, 1.7, 0, Math.PI * 2);
+    ctx.arc(headX - 7, headY - 2, 2.8, 0, Math.PI * 2);
+    ctx.arc(headX + 7, headY - 2, 2.8, 0, Math.PI * 2);
     ctx.fill();
     ctx.fillStyle = 'rgba(255,120,120,0.5)';
     ctx.beginPath();
-    ctx.arc(headX - 6, headY + 4, 2.4, 0, Math.PI * 2);
-    ctx.arc(headX + 6, headY + 4, 2.4, 0, Math.PI * 2);
+    ctx.arc(headX - 10, headY + 6, 4, 0, Math.PI * 2);
+    ctx.arc(headX + 10, headY + 6, 4, 0, Math.PI * 2);
     ctx.fill();
     ctx.strokeStyle = '#3a2a18';
-    ctx.lineWidth = 1.4;
+    ctx.lineWidth = 2.2;
     ctx.beginPath();
-    ctx.arc(headX, headY + 2, 4, 0.15 * Math.PI, 0.85 * Math.PI);
+    ctx.arc(headX, headY + 3, 7, 0.15 * Math.PI, 0.85 * Math.PI);
     ctx.stroke();
 
     // ---- Cart handle (chrome) ----
