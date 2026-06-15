@@ -39,12 +39,12 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 0 4px;
+    padding: 0 48px;
   }
   #pauseBtn {
     position: absolute;
     top: -2px;
-    right: 4px;
+    left: 4px;
     z-index: 5;
     pointer-events: auto;
     width: 38px;
@@ -89,7 +89,7 @@
     max-width: 420px;
   }
   #hint b { color: #ffd54f; font-weight: 700; }
-  #overlay {
+  #overlay, #menu {
     position: absolute;
     inset: 0;
     display: none;
@@ -99,10 +99,12 @@
     background: rgba(40,26,10,0.82);
     text-align: center;
   }
-  #overlay h1 { font-size: 44px; margin-bottom: 8px; color: #fff; }
-  #overlay p { font-size: 18px; color: #ffe9c2; margin-bottom: 6px; }
-  #overlay .gap { margin-bottom: 18px; }
-  #overlay button {
+  #menu { background: rgba(22,63,71,0.92); }
+  #overlay h1, #menu h1 { font-size: 44px; margin-bottom: 8px; color: #fff; }
+  #overlay p, #menu p { font-size: 18px; color: #ffe9c2; margin-bottom: 6px; }
+  #menu p b { color: #ffd54f; }
+  #overlay .gap, #menu .gap { margin-bottom: 18px; }
+  #overlay button, #menu button {
     pointer-events: auto;
     font-size: 16px;
     padding: 12px 30px;
@@ -114,7 +116,7 @@
     font-weight: 700;
     transition: transform 0.1s, background 0.2s;
   }
-  #overlay button:hover { background: #5cc760; transform: translateY(-2px); }
+  #overlay button:hover, #menu button:hover { background: #5cc760; transform: translateY(-2px); }
 </style>
 </head>
 <body>
@@ -130,6 +132,13 @@
     <div id="listbar">Collect: <span class="emojis" id="listEmojis">🍎</span></div>
     <div id="best">Best: 0</div>
     <div id="hint"><b>← →</b> move cart &nbsp; · &nbsp; catch the listed fruit <b>+1</b> &nbsp; · &nbsp; ⭐ <b>+5</b> &nbsp; · &nbsp; wrong or missed <b>−1</b> &nbsp; · &nbsp; 💣 <b>−1 life</b> &nbsp; · &nbsp; power-ups: <b>↔ wider cart</b>, <b>⏱ slow-mo</b></div>
+  </div>
+  <div id="menu">
+    <h1>🛒 Grocery Grab</h1>
+    <p>Catch the items on your shopping list!</p>
+    <p>🍎 list fruit <b>+1</b> &nbsp; ⭐ <b>+5</b> &nbsp; 💣 costs a life</p>
+    <p class="gap">Use <b>← →</b> to move · <b>P</b> to pause</p>
+    <button id="startBtn">Start Shopping</button>
   </div>
   <div id="overlay">
     <h1>Game Over</h1>
@@ -155,6 +164,8 @@
   const bestScore = document.getElementById('bestScore');
   const restartBtn = document.getElementById('restart');
   const pauseBtn = document.getElementById('pauseBtn');
+  const menu = document.getElementById('menu');
+  const startBtn = document.getElementById('startBtn');
 
   // Logical play-field; canvas scaled to device pixels for crispness.
   const W = 720;
@@ -281,6 +292,8 @@
     effects = { wide: 0, slow: 0 };   // seconds remaining for each power-up
     lastTime = 0;
     overlay.style.display = 'none';
+    menu.style.display = 'none';
+    pauseBtn.style.display = '';
     pauseBtn.textContent = '⏸';
     pauseBtn.setAttribute('aria-label', 'Pause');
     updateHud();
@@ -442,12 +455,20 @@
     finalScore.textContent = 'Score: ' + score;
     finalLevel.textContent = 'Reached Level ' + level;
     bestScore.textContent = 'Best: ' + highScore;
+    pauseBtn.style.display = 'none';
     overlay.style.display = 'flex';
   }
 
-  // Pause only toggles during active play; ignored once the game is over.
+  function showMenu() {
+    state = 'menu';
+    overlay.style.display = 'none';
+    pauseBtn.style.display = 'none';
+    menu.style.display = 'flex';
+  }
+
+  // Pause only toggles during active play; ignored on the menu / game-over screens.
   function setPaused(p) {
-    if (state === 'over') return;
+    if (state !== 'playing' && state !== 'paused') return;
     state = p ? 'paused' : 'playing';
     pauseBtn.textContent = p ? '▶' : '⏸';
     pauseBtn.setAttribute('aria-label', p ? 'Resume' : 'Pause');
@@ -960,11 +981,13 @@
   });
   window.addEventListener('keyup', function (e) { keys[e.code] = false; });
   restartBtn.addEventListener('click', reset);
+  startBtn.addEventListener('click', reset);
   pauseBtn.addEventListener('click', togglePause);
 
   setupCanvas();
   window.addEventListener('resize', setupCanvas);
-  reset();
+  reset();        // initialise the field so it renders behind the menu
+  showMenu();     // ...then open on the main menu
   loop();
 })();
 </script>
