@@ -110,7 +110,7 @@
     </div>
     <div id="listbar">Collect: <span class="emojis" id="listEmojis">🍎</span></div>
     <div id="best">Best: 0</div>
-    <div id="hint"><b>← →</b> move cart &nbsp; · &nbsp; catch the listed fruit <b>+1</b> &nbsp; · &nbsp; ⭐ <b>+5</b> &nbsp; · &nbsp; wrong or missed <b>−1</b> &nbsp; · &nbsp; 💣 <b>−1 life</b></div>
+    <div id="hint"><b>← →</b> move cart &nbsp; · &nbsp; catch the listed fruit <b>+1</b> &nbsp; · &nbsp; ⭐ <b>+5</b> &nbsp; · &nbsp; wrong or missed <b>−1</b> &nbsp; · &nbsp; 💣 <b>−1 life</b> &nbsp; · &nbsp; power-ups: <b>↔ wider cart</b>, <b>⏱ slow-mo</b></div>
   </div>
   <div id="overlay">
     <h1>Game Over</h1>
@@ -168,6 +168,13 @@
   let keys;
   let highScore = 0; // best score this session
   let levelFlash;    // {text, timer} for the "Level N!" banner
+  let effects;       // {wide, slow} seconds remaining for active power-ups
+  let lastTime;      // performance.now() of previous frame, for delta timing
+
+  // ---- Power-ups ----
+  const POWER_SECS = 5;     // how long an effect lasts once caught
+  const WIDE_MULT = 1.6;    // basket gets 60% wider
+  const SLOW_FACTOR = 0.4;  // falling items move at 40% speed
 
   // ---- Sound (Web Audio API, all generated in code) ----
   let audioCtx = null;
@@ -205,6 +212,8 @@
     wrong() { tone([400, 200], 0.18, 'sine', 0.18, 0); },
     miss()  { tone([520, 240], 0.18, 'sine', 0.18, 0); },
     bomb()  { tone([180, 70], 0.32, 'sawtooth', 0.28, 0); tone([120, 50], 0.32, 'square', 0.12, 0); },
+    power() { tone(523, 0.08, 'triangle', 0.22, 0.00); tone(784, 0.08, 'triangle', 0.22, 0.07);
+              tone(1047, 0.16, 'triangle', 0.22, 0.14); },
     level() { tone(523, 0.10, 'triangle', 0.22, 0.00); tone(659, 0.10, 'triangle', 0.22, 0.10);
               tone(784, 0.10, 'triangle', 0.22, 0.20); tone(1047, 0.18, 'triangle', 0.22, 0.30); },
     over()  { tone([440, 415], 0.22, 'triangle', 0.22, 0.00); tone([349, 330], 0.22, 'triangle', 0.22, 0.22);
@@ -239,7 +248,7 @@
   }
 
   function reset() {
-    player = { x: W / 2, w: 158, speed: 7 };
+    player = { x: W / 2, baseW: 158, w: 158, speed: 7 };
     items = [];
     score = 0;
     lives = 3;
@@ -249,6 +258,8 @@
     state = 'playing';
     keys = {};
     levelFlash = null;
+    effects = { wide: 0, slow: 0 };   // seconds remaining for each power-up
+    lastTime = 0;
     overlay.style.display = 'none';
     updateHud();
   }
@@ -272,8 +283,14 @@
 
   function spawn() {
     const r = 24;
-    let type, name, emoji;
-    if (Math.random() < bombChance()) {
+    let type, name, emoji, powerKind = null;
+    // From level 2 on, ~5% of drops are a catchable power-up.
+    if (level >= 2 && Math.random() < 0.05) {
+      type = 'power';
+      powerKind = Math.random() < 0.5 ? 'wide' : 'slow';
+      emoji = null;
+      name = null;
+    } else if (Math.random() < bombChance()) {
       type = 'bomb';
       emoji = '💣';
       name = null;
@@ -300,6 +317,7 @@
       type: type,
       name: name,
       emoji: emoji,
+      powerKind: powerKind,
       wobble: Math.random() * Math.PI * 2
     });
   }
@@ -319,8 +337,21 @@
   }
 
   function update() {
+    // Delta time (seconds), clamped so a backgrounded tab can't jump effects.
+    const now = performance.now();
+    const dt = lastTime ? Math.min(0.05, (now - lastTime) / 1000) : 0;
+    lastTime = now;
+
     if (levelFlash && levelFlash.timer > 0) levelFlash.timer--;
     if (state !== 'playing') return;
+
+    // Count down active power-ups.
+    if (effects.wide > 0) effects.wide = Math.max(0, effects.wide - dt);
+    if (effects.slow > 0) effects.slow = Math.max(0, effects.slow - dt);
+
+    // Wide-cart effect resizes the basket (and its catch zone) live.
+    player.w = player.baseW * (effects.wide > 0 ? WIDE_MULT : 1);
+    const slowMul = effects.slow > 0 ? SLOW_FACTOR : 1;
 
     if (keys['ArrowLeft'])  player.x -= player.speed;
     if (keys['ArrowRight']) player.x += player.speed;
@@ -334,14 +365,19 @@
     const c = cart();
     for (let i = items.length - 1; i >= 0; i--) {
       const it = items[i];
-      it.y += it.vy;
+      it.y += it.vy * slowMul;
       it.wobble += 0.05;
 
       const caught = it.x > c.left && it.x < c.right &&
                      it.y + it.r >= c.top && it.y - it.r <= c.bottom;
       if (caught) {
         items.splice(i, 1);
-        if (it.type === 'bomb') {
+        if (it.type === 'power') {
+          sfx.power();
+          if (it.powerKind === 'wide') effects.wide = POWER_SECS;
+          else                          effects.slow = POWER_SECS;
+          continue;
+        } else if (it.type === 'bomb') {
           sfx.bomb();
           lives--;
           updateHud();
@@ -453,6 +489,9 @@
       ctx.lineWidth = 3;
       ctx.strokeStyle = '#ff3b3b';
       ctx.stroke();
+    } else if (it.type === 'power') {
+      drawPowerBadge(x, y, it);
+      return;   // power-ups have no emoji glyph
     }
 
     // Emoji drawn directly. Force full opacity and an opaque fill first:
@@ -687,6 +726,129 @@
     drawWheel(c.right - 22, axleY, 9);
   }
 
+  // Distinct, non-fruit look: a glowing badge with a white pictogram.
+  // Wide cart = teal rounded square with a double-headed arrow.
+  // Slow motion = purple disc with a little clock.
+  function drawPowerBadge(x, y, it) {
+    const wide = it.powerKind === 'wide';
+    const R = it.r + 4;
+    const c1 = wide ? '#3fe0e8' : '#b07cff';
+    const c2 = wide ? '#1f8fd4' : '#6a2cc4';
+
+    // pulsing attention glow
+    const pulse = R + 6 + Math.sin(it.wobble * 3) * 3;
+    const g = ctx.createRadialGradient(x, y, R * 0.2, x, y, pulse + 12);
+    g.addColorStop(0, wide ? 'rgba(80,225,235,0.7)' : 'rgba(180,120,255,0.7)');
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(x, y, pulse + 12, 0, Math.PI * 2);
+    ctx.fill();
+
+    // badge body
+    const bg = ctx.createLinearGradient(x, y - R, x, y + R);
+    bg.addColorStop(0, c1);
+    bg.addColorStop(1, c2);
+    ctx.fillStyle = bg;
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 2.5;
+    if (wide) {
+      ctx.beginPath();
+      ctx.roundRect(x - R, y - R, R * 2, R * 2, 8);
+      ctx.fill();
+      ctx.stroke();
+    } else {
+      ctx.beginPath();
+      ctx.arc(x, y, R, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+
+    // white pictogram
+    ctx.strokeStyle = '#fff';
+    ctx.fillStyle = '#fff';
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    if (wide) {
+      // double-headed horizontal arrow
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(x - 13, y); ctx.lineTo(x + 13, y);
+      ctx.moveTo(x - 13, y); ctx.lineTo(x - 6, y - 6);
+      ctx.moveTo(x - 13, y); ctx.lineTo(x - 6, y + 6);
+      ctx.moveTo(x + 13, y); ctx.lineTo(x + 6, y - 6);
+      ctx.moveTo(x + 13, y); ctx.lineTo(x + 6, y + 6);
+      ctx.stroke();
+    } else {
+      // clock face + hands
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.arc(x, y, R - 7, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(x, y); ctx.lineTo(x, y - (R - 12));
+      ctx.moveTo(x, y); ctx.lineTo(x + (R - 14), y);
+      ctx.stroke();
+    }
+  }
+
+  // Small chips (top-left) counting down each active power-up.
+  function drawEffectChips() {
+    const active = [];
+    if (effects.wide > 0) active.push({ wide: true,  t: effects.wide });
+    if (effects.slow > 0) active.push({ wide: false, t: effects.slow });
+    let cy = 70;
+    for (const a of active) {
+      const x = 14, w = 116, h = 30;
+      ctx.save();
+      // pill background
+      ctx.fillStyle = 'rgba(0,0,0,0.45)';
+      ctx.beginPath();
+      ctx.roundRect(x, cy, w, h, 15);
+      ctx.fill();
+      // icon disc
+      const ix = x + 17, iy = cy + 15;
+      ctx.fillStyle = a.wide ? '#1f8fd4' : '#6a2cc4';
+      ctx.beginPath();
+      ctx.arc(ix, iy, 11, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#fff';
+      ctx.fillStyle = '#fff';
+      ctx.lineCap = 'round';
+      ctx.lineWidth = 2;
+      if (a.wide) {
+        ctx.beginPath();
+        ctx.moveTo(ix - 7, iy); ctx.lineTo(ix + 7, iy);
+        ctx.moveTo(ix - 7, iy); ctx.lineTo(ix - 3, iy - 4);
+        ctx.moveTo(ix - 7, iy); ctx.lineTo(ix - 3, iy + 4);
+        ctx.moveTo(ix + 7, iy); ctx.lineTo(ix + 3, iy - 4);
+        ctx.moveTo(ix + 7, iy); ctx.lineTo(ix + 3, iy + 4);
+        ctx.stroke();
+      } else {
+        ctx.beginPath();
+        ctx.arc(ix, iy, 6, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(ix, iy); ctx.lineTo(ix, iy - 4);
+        ctx.moveTo(ix, iy); ctx.lineTo(ix + 3, iy);
+        ctx.stroke();
+      }
+      // label
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 13px Segoe UI, sans-serif';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillText((a.wide ? 'Wide ' : 'Slow ') + a.t.toFixed(1) + 's', x + 33, iy + 1);
+      // shrinking time bar
+      ctx.fillStyle = a.wide ? '#3fe0e8' : '#b07cff';
+      ctx.beginPath();
+      ctx.roundRect(x + 4, cy + h - 5, (w - 8) * (a.t / POWER_SECS), 3, 1.5);
+      ctx.fill();
+      ctx.restore();
+      cy += 38;
+    }
+  }
+
   function drawFlash() {
     if (!levelFlash || levelFlash.timer <= 0) return;
     const t = levelFlash.timer;
@@ -712,6 +874,7 @@
     drawBackground();
     for (const it of items) drawItem(it);
     drawPlayer();
+    drawEffectChips();
     drawFlash();
   }
 
